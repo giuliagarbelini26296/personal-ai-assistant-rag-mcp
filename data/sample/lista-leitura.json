@@ -1,0 +1,8 @@
+{
+  "title": "Lista de leitura 2026",
+  "items": [
+    {"titulo": "Introdução a Recuperação de Informação", "status": "lendo", "nota": "capítulos sobre TF-IDF e similaridade de cosseno"},
+    {"titulo": "Padrões de projeto em Python", "status": "na fila", "nota": "foco em injeção de dependência e interfaces"},
+    {"titulo": "Engenharia de prompts na prática", "status": "concluído", "nota": "melhor parte: pedir para o modelo citar as fontes"}
+  ]
+}
