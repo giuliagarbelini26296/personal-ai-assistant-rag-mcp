@@ -1,0 +1,39 @@
+# Banco vetorial local para VECTOR_STORE=pgvector.
+# Porta 55433 só neste computador (127.0.0.1), para não conflitar com outros PostgreSQL.
+services:
+  pgvector:
+    image: pgvector/pgvector:0.8.1-pg17
+    environment:
+      POSTGRES_USER: rag
+      POSTGRES_PASSWORD: rag-local-only
+      POSTGRES_DB: rag
+    ports:
+      - "127.0.0.1:55433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # cria também o banco rag_test, usado só pelos testes (roda quando o volume é novo)
+      - ./docker/initdb.sql:/docker-entrypoint-initdb.d/initdb.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rag"]
+      interval: 5s
+      retries: 10
+
+  # Phoenix: tela para ver os traces (OpenTelemetry). Abra http://127.0.0.1:6006
+  # Recebe spans em http://127.0.0.1:6006/v1/traces (OTEL_EXPORTER=otlp).
+  phoenix:
+    image: arizephoenix/phoenix:version-21.1.0
+    ports:
+      - "127.0.0.1:6006:6006"
+    environment:
+      PHOENIX_WORKING_DIR: /data
+      # Desde a versão 21 o Phoenix exige login, e spans sem chave são recusados (401) em
+      # silêncio. Aqui ele só escuta em 127.0.0.1 (este computador), então o login fica
+      # desligado. Num servidor compartilhado: deixe ligado e mande a chave no cabeçalho
+      # (OTEL_EXPORTER_OTLP_TRACES_HEADERS=authorization=Bearer <chave>).
+      PHOENIX_ENABLE_AUTH: "false"
+    volumes:
+      - phoenixdata:/data
+
+volumes:
+  pgdata:
+  phoenixdata:

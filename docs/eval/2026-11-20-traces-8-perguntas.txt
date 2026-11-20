@@ -1,0 +1,13 @@
+pergunta                                                  ms passos  tok in tok out        US$
+Quantas xícaras de polvilho vão no pão de queijo?       1919      2    1756      68   0.000697
+Qual ingrediente deixa o salgadinho mineiro elástico    1961      2    1753      81   0.000728
+Quando é a próxima reunião do grupo de estudos?         1712      2    1712      61   0.000666
+Em que dia da viagem vejo o pôr do sol do alto de um    1544      2    1728      69   0.000691
+Como rodar várias tarefas ao mesmo tempo em Python s    2207      2    1611     264   0.001143
+Qual tamanho de chunk as anotações sugerem para come    1693      2    1781      71   0.000712
+O que as minhas notas dizem sobre similaridade de co    2150      2    1665     177   0.000942
+Qual é a senha do wi-fi da pousada em Lençóis?          2037      2    1663      78   0.000694
+
+perguntas: 8 · latência p50 1961 ms · p95 2207 ms
+custo estimado: total US$ 0.006273 · médio US$ 0.000784 por pergunta
+tempo por etapa: embedding.query 16% · llm.chat 84% · vector_store.search 0%

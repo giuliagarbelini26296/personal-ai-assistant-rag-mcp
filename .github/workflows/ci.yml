@@ -8,6 +8,18 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      pgvector:
+        image: pgvector/pgvector:0.8.1-pg17
+        env:
+          POSTGRES_USER: rag
+          POSTGRES_PASSWORD: ci-only
+          POSTGRES_DB: rag
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U rag" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgresql://rag:ci-only@localhost:5432/rag
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -16,8 +28,12 @@ jobs:
       - name: Install
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          pip install -e ".[dev,observability]"
       - name: Ruff
         run: ruff check .
-      - name: Pytest
+      - name: Pytest (inclui os testes com pgvector)
         run: pytest -q
+      - name: Avaliação da busca (portão de qualidade)
+        # Embedder por hashing: determinístico e sem chave de API. Linha de base: hit@4 0,95 e MRR 0,87.
+        # Se uma mudança derrubar a qualidade abaixo destes limites, o CI reprova.
+        run: python -m assistant.evals retrieval --min-hit-rate 0.9 --min-mrr 0.8

@@ -10,8 +10,9 @@ from .context import ConversationMemory
 from .embeddings import Embedder, get_embedder
 from .ingest import Document, IngestStats, index_document, ingest_path, slugify
 from .llm import LLM, get_llm
+from .observability import setup_tracing
 from .retrieval import Retriever, SearchResult
-from .store import VectorStore
+from .store import open_store
 from .tools import ToolRegistry
 
 
@@ -23,8 +24,11 @@ class AssistantService:
         llm: LLM | None = None,
     ) -> None:
         self.settings = settings or Settings()
+        setup_tracing(
+            self.settings.otel_exporter, self.settings.otel_endpoint, self.settings.otel_jsonl_path
+        )
         self.embedder = embedder or get_embedder(self.settings)
-        self.store = VectorStore(self.settings.db_path, self.embedder.name)
+        self.store = open_store(self.settings, self.embedder.name)
         self.retriever = Retriever(self.store, self.embedder)
         self.tools = ToolRegistry(self)
         self._llm = llm

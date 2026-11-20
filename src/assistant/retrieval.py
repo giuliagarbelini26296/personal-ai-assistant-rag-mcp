@@ -5,7 +5,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 
 from .embeddings import Embedder, tokenize
-from .store import VectorStore
+from .observability import SPAN_KIND, tracer
+from .store import Store
 
 
 @dataclass(frozen=True)
@@ -44,7 +45,7 @@ def dedupe(results: list[SearchResult], threshold: float = 0.8) -> list[SearchRe
 class Retriever:
     def __init__(
         self,
-        store: VectorStore,
+        store: Store,
         embedder: Embedder,
         vector_weight: float = 0.7,
         min_score: float = 0.05,
@@ -55,9 +56,34 @@ class Retriever:
         self.min_score = min_score
 
     def search(self, query: str, k: int = 4) -> list[SearchResult]:
-        query_vec = self.embedder.embed([query])[0]
+        with tracer().start_as_current_span("retrieval.search") as span:
+            span.set_attribute(SPAN_KIND, "RETRIEVER")
+            span.set_attribute("input.value", query[:500])
+            span.set_attribute("retrieval.k", k)
+            span.set_attribute("retrieval.embedder", getattr(self.embedder, "name", "?"))
+            results = self._search(query, k)
+            span.set_attribute("retrieval.returned", len(results))
+            if results:
+                span.set_attribute("retrieval.top_score", results[0].score)
+            for i, r in enumerate(results):  # documentos recuperados, na ordem
+                prefix = f"retrieval.documents.{i}.document"
+                span.set_attribute(f"{prefix}.id", f"{r.source}#{r.chunk_index}")
+                span.set_attribute(f"{prefix}.score", r.score)
+                span.set_attribute(f"{prefix}.content", r.text[:1000])
+            return results
+
+    def _search(self, query: str, k: int) -> list[SearchResult]:
+        with tracer().start_as_current_span("embedding.query") as span:
+            span.set_attribute(SPAN_KIND, "EMBEDDING")
+            span.set_attribute("embedding.model_name", getattr(self.embedder, "name", "?"))
+            span.set_attribute("gen_ai.operation.name", "embeddings")
+            span.set_attribute("gen_ai.request.model", getattr(self.embedder, "name", "?"))
+            query_vec = self.embedder.embed_query(query)
         # Busca mais candidatos do que o necessário e reordena (rerank leve).
-        candidates = self.store.search(query_vec, k=max(k * 4, 10))
+        with tracer().start_as_current_span("vector_store.search") as span:
+            span.set_attribute("db.system", type(self.store).__name__)
+            candidates = self.store.search(query_vec, k=max(k * 4, 10))
+            span.set_attribute("vector_store.candidates", len(candidates))
         w = self.vector_weight
         rescored = [
             SearchResult(

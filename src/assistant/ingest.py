@@ -10,7 +10,7 @@ from pathlib import Path
 
 from .chunking import chunk_text
 from .embeddings import Embedder
-from .store import VectorStore
+from .store import Store, content_hash
 
 logger = logging.getLogger(__name__)
 SUPPORTED_SUFFIXES = {".md", ".txt", ".json"}
@@ -69,7 +69,7 @@ def load_documents(path: Path) -> list[Document]:
 
 
 def index_document(
-    doc: Document, store: VectorStore, embedder: Embedder, chunk_size: int, overlap: int
+    doc: Document, store: Store, embedder: Embedder, chunk_size: int, overlap: int
 ) -> int:
     chunks = [c.text for c in chunk_text(doc.text, chunk_size, overlap)]
     if not chunks:
@@ -79,12 +79,12 @@ def index_document(
 
 
 def ingest_path(
-    path: Path, store: VectorStore, embedder: Embedder, chunk_size: int, overlap: int
+    path: Path, store: Store, embedder: Embedder, chunk_size: int, overlap: int
 ) -> IngestStats:
     stats = IngestStats()
     for doc in load_documents(path):
         stats.files_seen += 1
-        if store.document_hash(doc.source) == VectorStore.content_hash(doc.text):
+        if store.document_hash(doc.source) == content_hash(doc.text):
             stats.unchanged += 1
             continue
         n = index_document(doc, store, embedder, chunk_size, overlap)

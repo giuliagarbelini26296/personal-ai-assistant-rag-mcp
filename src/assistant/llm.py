@@ -22,18 +22,42 @@ class ToolCall:
     id: str
     name: str
     arguments: str  # JSON em string, como na API da OpenAI
+    # Dados extras do provedor que precisam voltar no histórico. O Gemini 3 manda uma
+    # "thought_signature" em cada chamada de ferramenta e recusa (400) a próxima mensagem
+    # se ela não for reenviada.
+    extra: dict | None = None
+
+
+@dataclass(frozen=True)
+class Usage:
+    input_tokens: int = 0
+    output_tokens: int = 0  # inclui tokens de raciocínio ("thinking") quando houver
+    reasoning_tokens: int = 0
 
 
 @dataclass
 class LLMResponse:
     content: str | None = None
     tool_calls: list[ToolCall] = field(default_factory=list)
+    usage: Usage | None = None  # None quando o provedor não informa (ex.: FakeLLM)
 
 
 class LLM(Protocol):
     name: str
 
     def chat(self, messages: list[dict], tools: list[dict]) -> LLMResponse: ...
+
+
+def _usage(response) -> Usage | None:
+    u = getattr(response, "usage", None)
+    if u is None:
+        return None
+    details = getattr(u, "completion_tokens_details", None)
+    return Usage(
+        input_tokens=u.prompt_tokens or 0,
+        output_tokens=u.completion_tokens or 0,
+        reasoning_tokens=(getattr(details, "reasoning_tokens", 0) or 0) if details else 0,
+    )
 
 
 class OpenAIChatLLM:
@@ -43,8 +67,17 @@ class OpenAIChatLLM:
         except ImportError as exc:  # pragma: no cover
             raise RuntimeError("Instale o extra: pip install -e '.[openai]'") from exc
         self.model = model
+        self.provider = name
         self.name = f"{name}:{model}"
-        self._client = OpenAI(api_key=api_key, base_url=base_url or None)
+        # max_retries: o SDK repete sozinho em 429/5xx, com espera crescente.
+        self._client = OpenAI(api_key=api_key, base_url=base_url or None, max_retries=5)
+
+    def complete(self, prompt: str) -> str:
+        """Uma chamada simples, sem ferramentas (usada pelo juiz da avaliação)."""
+        response = self._client.chat.completions.create(
+            model=self.model, messages=[{"role": "user", "content": prompt}], temperature=0
+        )
+        return response.choices[0].message.content or ""
 
     def chat(self, messages: list[dict], tools: list[dict]) -> LLMResponse:
         response = self._client.chat.completions.create(
@@ -52,10 +85,15 @@ class OpenAIChatLLM:
         )
         msg = response.choices[0].message
         calls = [
-            ToolCall(tc.id, tc.function.name, tc.function.arguments or "{}")
+            ToolCall(
+                tc.id,
+                tc.function.name,
+                tc.function.arguments or "{}",
+                (tc.model_extra or {}).get("extra_content"),
+            )
             for tc in (msg.tool_calls or [])
         ]
-        return LLMResponse(content=msg.content, tool_calls=calls)
+        return LLMResponse(content=msg.content, tool_calls=calls, usage=_usage(response))
 
 
 NOTE_PATTERN = r"^(anote|salve (uma )?nota|adicione (uma )?nota)\s*[:\-]?\s*(.+)$"
@@ -154,6 +192,10 @@ class FakeLLM:
         return "Pelas suas notas:\n" + "\n".join(lines)
 
 
+# O Gemini aceita o formato da API da OpenAI neste endereço (inclusive tool calling).
+GEMINI_OPENAI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
+
+
 def get_llm(settings: Settings) -> LLM:
     provider = settings.llm_provider.lower()
     if provider == "fake":
@@ -163,6 +205,15 @@ def get_llm(settings: Settings) -> LLM:
             raise RuntimeError("OPENAI_API_KEY não definida para LLM_PROVIDER=openai")
         return OpenAIChatLLM(
             settings.llm_model or "gpt-4o-mini", settings.openai_api_key, settings.openai_base_url
+        )
+    if provider == "gemini":
+        if not settings.gemini_api_key:
+            raise RuntimeError("GEMINI_API_KEY não definida para LLM_PROVIDER=gemini")
+        return OpenAIChatLLM(
+            settings.llm_model or "gemini-3.5-flash-lite",
+            settings.gemini_api_key,
+            GEMINI_OPENAI_URL,
+            name="gemini",
         )
     if provider == "ollama":
         return OpenAIChatLLM(

@@ -22,6 +22,12 @@ class JsonFormatter(logging.Formatter):
             "msg": record.getMessage(),
         }
         payload.update({k: v for k, v in vars(record).items() if k not in _RESERVED})
+        # Liga o log ao trace: com o trace_id, dá para achar no Phoenix a pergunta deste log.
+        from .observability import current_trace_id
+
+        trace_id = current_trace_id()
+        if trace_id:
+            payload["trace_id"] = trace_id
         if record.exc_info:
             payload["exc"] = self.formatException(record.exc_info)
         return json.dumps(payload, ensure_ascii=False, default=str)

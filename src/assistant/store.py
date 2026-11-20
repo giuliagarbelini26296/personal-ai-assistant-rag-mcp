@@ -1,4 +1,12 @@
-"""Vector store simples em SQLite: vetores salvos como JSON, similaridade de cosseno com numpy."""
+"""Vector stores.
+
+- `VectorStore` (SQLite): vetores salvos como JSON e cosseno calculado com numpy, comparando a
+  pergunta com todos os chunks. Simples e sem servidor; bom para poucos documentos.
+- `PgVectorStore` (em `store_pg.py`): PostgreSQL + pgvector, com índice HNSW. O banco faz a
+  busca dos vizinhos mais próximos, sem carregar todos os vetores na memória.
+
+Os dois seguem o protocolo `Store`, então o resto do código não sabe qual está em uso.
+"""
 
 from __future__ import annotations
 
@@ -7,8 +15,12 @@ import json
 import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Protocol
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from .config import Settings
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -37,6 +49,39 @@ class StoredChunk:
     score: float
 
 
+def content_hash(text: str) -> str:
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+class Store(Protocol):
+    def document_hash(self, source: str) -> str | None: ...
+
+    def upsert_document(
+        self, source: str, content: str, chunks: list[str], vectors: list[list[float]]
+    ) -> None: ...
+
+    def search(self, query_vector: list[float], k: int = 5) -> list[StoredChunk]: ...
+
+    def list_sources(self) -> list[dict]: ...
+
+    def count_chunks(self) -> int: ...
+
+    def close(self) -> None: ...
+
+
+def open_store(settings: Settings, embedder_name: str) -> Store:
+    kind = settings.vector_store.lower()
+    if kind == "sqlite":
+        return VectorStore(settings.db_path, embedder_name)
+    if kind == "pgvector":
+        from .store_pg import PgVectorStore
+
+        if not settings.database_url:
+            raise RuntimeError("DATABASE_URL não definida para VECTOR_STORE=pgvector")
+        return PgVectorStore(settings.database_url, embedder_name)
+    raise ValueError(f"VECTOR_STORE desconhecido: {settings.vector_store!r}")
+
+
 class VectorStore:
     def __init__(self, db_path: str, embedder_name: str) -> None:
         # check_same_thread=False: FastAPI pode executar rotas síncronas em threads diferentes.
@@ -56,9 +101,7 @@ class VectorStore:
                 "Apague o arquivo do banco e rode a ingestão de novo."
             )
 
-    @staticmethod
-    def content_hash(text: str) -> str:
-        return hashlib.sha256(text.encode()).hexdigest()
+    content_hash = staticmethod(content_hash)
 
     def document_hash(self, source: str) -> str | None:
         row = self._conn.execute(

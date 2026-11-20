@@ -58,6 +58,12 @@ class ChatResponse(BaseModel):
     sources: list[str]
     steps: int
     tool_calls: list[dict]
+    # Observabilidade: use o trace_id para achar esta resposta no Phoenix.
+    trace_id: str | None = None
+    latency_ms: float = 0.0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cost_usd: float | None = None
 
 
 def create_app(service: AssistantService | None = None) -> FastAPI:

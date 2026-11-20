@@ -34,6 +34,34 @@ exata é limitado e um LLM sozinho não conhece essas notas (e pode inventar res
 Tudo roda **offline e sem chave de API** por padrão: embeddings por hashing (bag-of-words)
 e um `FakeLLM` determinístico. OpenAI e Ollama são opcionais via variáveis de ambiente.
 
+
+### Evolução 1 — embeddings semânticos e pgvector (20/11/2026)
+
+- **Embeddings do Gemini** (`gemini-embedding-001`, 768 dimensões, `taskType` diferente para documento e pergunta, normalização, lotes e nova tentativa em 429/5xx).
+- **PostgreSQL + pgvector** com índice HNSW, escolhido por `VECTOR_STORE=pgvector`. O SQLite continua como padrão sem servidor.
+- **Comparação real** com 6 perguntas que não repetem as palavras das notas (`scripts/compare_embeddings.py`): hashing acertou **4/6** no 1º lugar; Gemini acertou **6/6**.
+- Guia de estudo: [docs/estudo/01-embeddings-e-pgvector.md](docs/estudo/01-embeddings-e-pgvector.md).
+
+### Evolução 2 — avaliação do RAG (20/11/2026)
+
+- **Conjunto de referência** com 24 perguntas em 4 categorias (direta, paráfrase, multi-fonte e sem resposta), em `data/eval/golden.jsonl`.
+- **Métricas de busca** (hit@1, hit@4, recall@4, MRR) e **de resposta** (fatos presentes, citação, abstenção), além de **LLM como juiz** para fidelidade (alucinação) e corretude.
+- **Portão de qualidade no CI:** a avaliação da busca roda a cada push e reprova abaixo de hit@4 0,9 ou MRR 0,8.
+- **Resultados da busca** (21 perguntas com resposta): hashing hit@1 0,81 e MRR 0,87; Gemini hit@1 **0,95** e MRR **0,98**.
+- **Resultados das respostas** (24 perguntas; `gemini-3.5-flash-lite` avaliado por `gemini-3.5-flash`): fidelidade **5,0/5** (nenhuma alucinação), corretude **4,83/5**, admitiu não saber nas **3/3** perguntas sem resposta. Única falha: uma paráfrase em que a busca acertou e o modelo foi literal demais.
+- Relatórios: [docs/eval/](docs/eval/).
+- Guia de estudo: [docs/estudo/02-avaliacao-do-rag.md](docs/estudo/02-avaliacao-do-rag.md).
+
+### Evolução 3 — observabilidade (20/11/2026)
+
+![Trace de uma pergunta no Phoenix](docs/img/phoenix-trace.jpg)
+
+- **OpenTelemetry** em cada pergunta: spans de agente, chamada ao LLM, ferramenta, busca, embedding e banco vetorial, com as convenções `gen_ai.*` e OpenInference.
+- **Tokens, custo e latência** por pergunta, visíveis no trace, nos logs JSON (`trace_id`), na resposta da API `/chat` e nos relatórios de avaliação.
+- **Arize Phoenix** local em Docker para ver os traces; também exporta para arquivo JSONL, com o resumo `scripts/trace_report.py`.
+- **Números reais** (8 perguntas, Gemini + pgvector): latência p50 **1,96 s** e p95 **2,21 s**; custo estimado **US$ 0,00078 por pergunta** (cerca de US$ 0,78 por mil); o LLM é **84%** do tempo e a busca no pgvector, 4 ms.
+- Guia de estudo: [docs/estudo/03-observabilidade.md](docs/estudo/03-observabilidade.md).
+
 ## Arquitetura
 
 ```mermaid
@@ -265,19 +293,23 @@ pytest -q
 pytest -q tests/test_mcp.py     # só os testes MCP
 ```
 
-Resultados reais obtidos em 19/11/2026 (macOS, Python 3.12.16):
+Resultados reais obtidos em 20/11/2026 (macOS, Python 3.12.16):
 
 ```
-ruff check .                -> All checks passed!
-pytest -q                   -> 34 passed in 1.72s
-pytest -q tests/test_mcp.py -> 2 passed in 1.11s
+ruff check .                                  -> All checks passed!
+pytest -q                                     -> 63 passed, 4 skipped
+TEST_DATABASE_URL=.../rag_test pytest -q   -> 67 passed
 ```
+
+Os 4 testes de pgvector só rodam com `TEST_DATABASE_URL` definida (banco `rag_test`, criado pelo `docker compose -p rag-mcp up -d pgvector`); no CI há um serviço pgvector e eles sempre rodam.
 
 O que os testes cobrem: chunking/overlap, embeddings determinísticos, vector store e rejeição de
 embedder diferente, retrieval e dedupe, orçamento de tokens e memória, validação das tools,
 loop do agente com `FakeLLM` (incluindo recuperação após erro de argumento, limite de passos e
 citação automática de fontes), endpoints da API via `TestClient` e o servidor MCP (in-process e
-via stdio). A CI (`.github/workflows/ci.yml`) roda `ruff check` e `pytest` em Python 3.12.
+via stdio), o embedder do Gemini com API falsa (lotes, `taskType`, normalização, nova tentativa em 429) e o
+PgVectorStore num PostgreSQL real. A CI (`.github/workflows/ci.yml`) roda `ruff check` e `pytest` em Python 3.12
+com um serviço pgvector.
 
 ## Implementado vs. planejado
 
@@ -285,36 +317,40 @@ via stdio). A CI (`.github/workflows/ci.yml`) roda `ruff check` e `pytest` em Py
 |---|---|
 | Ingestão md/txt/json, chunking com overlap, reindexação incremental | Implementado |
 | Embeddings offline (hashing) | Implementado e testado |
+| Embeddings Gemini (`gemini-embedding-001`) | Implementado e testado com a API real (comparação 6/6) |
 | Embeddings OpenAI / Ollama | Implementado, **não testado** com serviço real |
 | Vector store SQLite + cosseno (numpy) | Implementado |
+| Vector store PostgreSQL + pgvector com índice HNSW | Implementado e testado (local e CI) |
 | Retrieval híbrido (cosseno + keywords) e dedupe | Implementado (rerank simples, sem BM25 completo) |
 | Agente com tool calling, validação Pydantic, max passos, citações | Implementado e testado com `FakeLLM` |
 | LLM OpenAI / Ollama (endpoint compatível) | Implementado, **não testado** com serviço real |
 | Orçamento de tokens, janela de histórico, rolling summary | Implementado (contagem aproximada; resumo extrativo) |
 | API REST (/health, /ingest, /search, /chat) com logs JSON | Implementado e testado |
 | Servidor MCP (stdio) com tools + resource | Implementado e testado com o cliente do SDK |
-| Avaliação de qualidade do retrieval (dataset + métricas) | Planejado |
+| Avaliação de busca e de respostas (golden set, métricas, LLM como juiz, portão no CI) | Implementado; respostas avaliadas com Gemini |
+| LLM Gemini (`LLM_PROVIDER=gemini`, endpoint compatível com OpenAI) | Implementado e testado com a API real |
+| Observabilidade: traces OpenTelemetry, tokens, custo, latência, Phoenix | Implementado e testado (local e com a API real) |
 | Resumo da conversa gerado pelo LLM | Planejado |
 | Persistência das sessões de chat da API | Planejado (hoje ficam em memória) |
 | Autenticação na API | Planejado |
-| Busca vetorial indexada (ex.: sqlite-vec) para bases grandes | Planejado |
 
 ## Limitações
 
-- O embedder por hashing é lexical, não semântico: sinônimos não são encontrados.
-- A busca carrega todos os vetores na memória a cada consulta (ok para centenas/poucos milhares
-  de chunks, não para bases grandes).
+- O embedder por hashing é lexical, não semântico: sinônimos não são encontrados (use `EMBEDDING_PROVIDER=gemini`).
+- No modo SQLite, a busca carrega todos os vetores na memória a cada consulta (ok para centenas/poucos
+  milhares de chunks). Para bases grandes, use `VECTOR_STORE=pgvector`.
+- Com o Gemini, a cota gratuita limita o volume de ingestão por dia.
 - Contagem de tokens aproximada (~4 caracteres por token).
 - `add_note` salva a nota apenas no banco, não em arquivo.
 - Sessões do `/chat` vivem em memória e se perdem ao reiniciar.
-- Não há métricas de qualidade de respostas; os testes verificam comportamento, não acurácia.
+- A avaliação das respostas usa a cota gratuita do Gemini; com 24 perguntas e juiz, leva vários minutos.
+- O conjunto de referência é pequeno (24 perguntas) e foi escrito pela autora; não cobre todos os tipos de pergunta.
 
 ## Próximos passos
 
-1. Criar um pequeno conjunto de perguntas/respostas esperadas e medir hit rate / MRR do retrieval.
-2. Testar com Ollama local e com a OpenAI e documentar as diferenças.
+1. Usar a avaliação para comparar versões do prompt e do chunking.
+2. Adicionar BM25 de verdade e comparar com o rerank atual usando o portão de qualidade.
 3. Trocar o resumo extrativo por um resumo gerado pelo LLM.
-4. Adicionar BM25 de verdade e comparar com o rerank atual.
 
 ## Licença
 

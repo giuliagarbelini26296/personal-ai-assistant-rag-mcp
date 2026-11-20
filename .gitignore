@@ -24,3 +24,5 @@ venv/
 .coverage
 htmlcov/
 .DS_Store
+eval_results/
+traces/

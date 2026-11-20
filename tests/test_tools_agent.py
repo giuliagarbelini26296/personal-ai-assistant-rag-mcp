@@ -81,3 +81,35 @@ def test_agent_uses_conversation_memory(service):
     last_prompt = agent.llm.calls[-1]
     assert last_prompt[1]["role"] == "system"
     assert "Resumo da conversa anterior" in last_prompt[1]["content"]
+
+
+def test_provider_extra_data_is_sent_back_with_tool_calls(service):
+    """O Gemini 3 recusa a conversa se a thought_signature da chamada não voltar no histórico."""
+    from assistant.llm import LLMResponse, ToolCall
+
+    seen = []
+
+    class SignatureLLM:
+        name = "fake-signature"
+
+        def __init__(self):
+            self.turn = 0
+
+        def chat(self, messages, tools):
+            seen.append(messages)
+            self.turn += 1
+            if self.turn == 1:
+                extra = {"google": {"thought_signature": "abc"}}
+                return LLMResponse(
+                    tool_calls=[ToolCall("c1", "search_notes", '{"query": "polvilho"}', extra)]
+                )
+            return LLMResponse(content="ok")
+
+    from assistant.agent import Agent
+
+    result = Agent(SignatureLLM(), service.tools).run("polvilho?")
+    assistant_msg = next(m for m in seen[1] if m["role"] == "assistant")
+    assert assistant_msg["tool_calls"][0]["extra_content"] == {
+        "google": {"thought_signature": "abc"}
+    }
+    assert result.contexts and result.contexts[0].startswith("[")
