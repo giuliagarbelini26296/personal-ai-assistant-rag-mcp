@@ -1,0 +1,60 @@
+name: Deploy (Azure Container Apps)
+
+# A cada push na main que muda o código: constrói a imagem, publica no GitHub Container Registry
+# e atualiza a app no Azure. O login no Azure usa OIDC (identidade federada): nenhuma senha ou
+# chave do Azure fica guardada no GitHub.
+on:
+  push:
+    branches: [main]
+    paths: ["src/**", "data/**", "Dockerfile", "pyproject.toml", ".github/workflows/deploy.yml"]
+  workflow_dispatch:
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ env.IMAGE }}:${{ github.sha }},${{ env.IMAGE }}:latest
+          labels: org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+
+  deploy:
+    needs: build
+    # Só roda depois que a infraestrutura existe e as variáveis do Azure foram cadastradas.
+    if: ${{ vars.AZURE_CLIENT_ID != '' }}
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # necessário para o OIDC
+      contents: read
+    steps:
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Atualiza a imagem da app
+        run: >
+          az containerapp update -n ca-assistant -g ${{ vars.AZURE_RESOURCE_GROUP }}
+          --image ${{ env.IMAGE }}:${{ github.sha }} --only-show-errors -o none
+      - name: Smoke test
+        run: |
+          url="https://$(az containerapp show -n ca-assistant -g ${{ vars.AZURE_RESOURCE_GROUP }} --query properties.configuration.ingress.fqdn -o tsv)"
+          # a app escala a zero: a primeira chamada pode levar alguns segundos para acordar
+          for i in $(seq 1 20); do curl -sf -m 20 "$url/health" && break; sleep 6; done
+          curl -sf -m 20 "$url/health" | tee /dev/stderr | grep -q '"status":"ok"'
+          # sem a chave, as rotas protegidas precisam recusar
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$url/search" -H 'Content-Type: application/json' -d '{"query":"teste"}')" = "401"
