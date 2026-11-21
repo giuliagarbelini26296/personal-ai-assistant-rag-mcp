@@ -1,0 +1,2 @@
+# Falso positivo: ID público do papel "Key Vault Secrets User" do Azure (igual em todos os tenants)
+aa514e910ef3d1eacb437c13fb584d9728085191:infra/main.bicep:generic-api-key:95

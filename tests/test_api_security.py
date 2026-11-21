@@ -44,3 +44,15 @@ def test_ingest_outside_allowed_folder_is_forbidden(service, tmp_path):
     # ".." não escapa da pasta: o caminho é resolvido antes da verificação
     escape = str(tmp_path / ".." / "..")
     assert client.post("/ingest", json={"path": escape}).status_code == 403
+
+
+def test_provider_quota_becomes_503_with_retry_after(service, monkeypatch):
+    import httpx
+
+    def quota_exhausted(*_a, **_k):
+        req = httpx.Request("POST", "https://provedor/embed")
+        raise httpx.HTTPStatusError("429", request=req, response=httpx.Response(429, request=req))
+
+    monkeypatch.setattr(service, "search", quota_exhausted)
+    resp = TestClient(create_app(service)).post("/search", json={"query": "viagem"})
+    assert resp.status_code == 503 and resp.headers["retry-after"] == "3600"

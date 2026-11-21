@@ -28,6 +28,12 @@ param apiKey string
 @description('Senha do administrador do Postgres (só letras e números, para caber na URL).')
 param dbAdminPassword string
 
+@description('Object ID de quem administra (pode ler e gravar segredos no Key Vault). Vazio = ninguém além da app.')
+param adminPrincipalId string = ''
+
+@description('Repositório do GitHub autorizado a fazer deploy (OIDC), no formato dono/nome.')
+param githubRepo string = 'giuliagarbelini26296/personal-ai-assistant-rag-mcp'
+
 var suffix = uniqueString(resourceGroup().id)
 var dbAdmin = 'assistant'
 var dbName = 'assistant'
@@ -92,13 +98,54 @@ resource secretDbUrl 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
 }
 
 // "Key Vault Secrets User": a identidade da app só LÊ segredos (menor privilégio).
-var kvSecretsUserRole = '4633458b-17de-408a-b874-0445c86b69e6'
+var kvSecretsUserRole = '4633458b-17de-408a-b874-0445c86b69e6' // gitleaks:allow (ID público do papel)
 resource vaultAccess 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   scope: vault
   name: guid(vault.id, identity.id, kvSecretsUserRole)
   properties: {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', kvSecretsUserRole)
     principalId: identity.properties.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+// "Key Vault Secrets Officer" para a pessoa administradora: com RBAC, nem a dona da assinatura
+// lê segredos sem um papel explícito.
+var kvSecretsOfficerRole = 'b86a8fe4-44ce-4948-aee5-eccb2c155cd7' // gitleaks:allow (ID público do papel)
+resource vaultAdmin 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(adminPrincipalId)) {
+  scope: vault
+  name: guid(vault.id, adminPrincipalId, kvSecretsOfficerRole)
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', kvSecretsOfficerRole)
+    principalId: adminPrincipalId
+    principalType: 'User'
+  }
+}
+
+// Identidade usada pelo GitHub Actions para o deploy. Sem senha: o Azure confia no token OIDC
+// que o GitHub emite SÓ para pushes na main deste repositório (campo subject).
+resource deployIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
+  name: 'id-github-deploy-${suffix}'
+  location: location
+}
+
+resource deployFederation 'Microsoft.ManagedIdentity/userAssignedIdentities/federatedIdentityCredentials@2023-01-31' = {
+  parent: deployIdentity
+  name: 'github-main'
+  properties: {
+    issuer: 'https://token.actions.githubusercontent.com'
+    subject: 'repo:${githubRepo}:ref:refs/heads/main'
+    audiences: [ 'api://AzureADTokenExchange' ]
+  }
+}
+
+// Contributor só neste grupo de recursos: o deploy não enxerga o resto da assinatura.
+var contributorRole = 'b24988ac-6180-42a0-ab88-20f7382dd24c' // gitleaks:allow (ID público do papel)
+resource deployAccess 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(resourceGroup().id, deployIdentity.id, contributorRole)
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', contributorRole)
+    principalId: deployIdentity.properties.principalId
     principalType: 'ServicePrincipal'
   }
 }
@@ -140,10 +187,14 @@ resource pgFirewallAzure 'Microsoft.DBforPostgreSQL/flexibleServers/firewallRule
 }
 
 // ------------------------------------------------------------------ aplicação
-resource environment 'Microsoft.App/managedEnvironments@2024-03-01' = {
+resource environment 'Microsoft.App/managedEnvironments@2026-07-01' = {
   name: 'cae-assistant-${suffix}'
   location: location
   properties: {
+    // Sem isto, o Azure cria o ambiente no modo "Express" (padrão novo), que NÃO aceita
+    // segredos do Key Vault. Achado no 1º deploy: erro ExpressKeyVaultSecretsNotSupported.
+    environmentMode: 'WorkloadProfiles'
+    workloadProfiles: [ { name: 'Consumption', workloadProfileType: 'Consumption' } ]
     appLogsConfiguration: {
       destination: 'log-analytics'
       logAnalyticsConfiguration: {
@@ -164,6 +215,7 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
   dependsOn: [ vaultAccess, database, pgFirewallAzure ]
   properties: {
     managedEnvironmentId: environment.id
+    workloadProfileName: 'Consumption'
     configuration: {
       ingress: {
         external: true
@@ -215,3 +267,4 @@ output apiUrl string = 'https://${app.properties.configuration.ingress.fqdn}'
 output containerAppName string = app.name
 output keyVaultName string = vault.name
 output postgresHost string = postgres.properties.fullyQualifiedDomainName
+output deployClientId string = deployIdentity.properties.clientId

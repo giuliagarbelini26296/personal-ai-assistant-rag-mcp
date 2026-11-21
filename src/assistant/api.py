@@ -8,6 +8,7 @@ import time
 import uuid
 from pathlib import Path
 
+import httpx
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -91,6 +92,21 @@ def create_app(service: AssistantService | None = None) -> FastAPI:
             },
         )
         return response
+
+    @app.exception_handler(httpx.HTTPStatusError)
+    async def provider_error(request: Request, exc: httpx.HTTPStatusError):
+        """Cota ou limite do provedor de IA (Gemini/OpenAI) não é erro interno: é 503,
+        "indisponível por enquanto", com Retry-After para o cliente tentar depois.
+        Achado em produção: o /ingest devolvia 500 quando a cota diária de embeddings acabava."""
+        if exc.response.status_code == 429:
+            logger.warning("cota do provedor de IA esgotada", extra={"path": request.url.path})
+            return JSONResponse(
+                status_code=503,
+                content={"detail": "Cota do provedor de IA esgotada. Tente novamente mais tarde."},
+                headers={"Retry-After": "3600"},
+            )
+        logger.exception("erro do provedor de IA", extra={"path": request.url.path})
+        return JSONResponse(status_code=502, content={"detail": "Falha no provedor de IA."})
 
     @app.exception_handler(Exception)
     async def unhandled(request: Request, exc: Exception):
