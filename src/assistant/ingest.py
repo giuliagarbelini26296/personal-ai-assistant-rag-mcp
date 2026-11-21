@@ -68,10 +68,26 @@ def load_documents(path: Path) -> list[Document]:
     return [read_document(p, path) for p in files]
 
 
+def document_title(text: str) -> str | None:
+    """Primeira linha no formato Markdown "# Título", se houver."""
+    first = text.lstrip().split("\n", 1)[0].strip()
+    return first.lstrip("#").strip() if first.startswith("# ") else None
+
+
 def index_document(
-    doc: Document, store: Store, embedder: Embedder, chunk_size: int, overlap: int
+    doc: Document,
+    store: Store,
+    embedder: Embedder,
+    chunk_size: int,
+    overlap: int,
+    title_prefix: bool = False,
 ) -> int:
     chunks = [c.text for c in chunk_text(doc.text, chunk_size, overlap)]
+    title = document_title(doc.text) if title_prefix else None
+    if title:
+        # "Contextual chunk header": o 1º chunk já começa com o título; os outros ganham uma
+        # linha [título], para que a busca saiba de qual documento (e data) o trecho é.
+        chunks = [c if i == 0 else f"[{title}]\n{c}" for i, c in enumerate(chunks)]
     if not chunks:
         return 0
     store.upsert_document(doc.source, doc.text, chunks, embedder.embed(chunks))
@@ -79,7 +95,12 @@ def index_document(
 
 
 def ingest_path(
-    path: Path, store: Store, embedder: Embedder, chunk_size: int, overlap: int
+    path: Path,
+    store: Store,
+    embedder: Embedder,
+    chunk_size: int,
+    overlap: int,
+    title_prefix: bool = False,
 ) -> IngestStats:
     stats = IngestStats()
     for doc in load_documents(path):
@@ -87,7 +108,7 @@ def ingest_path(
         if store.document_hash(doc.source) == content_hash(doc.text):
             stats.unchanged += 1
             continue
-        n = index_document(doc, store, embedder, chunk_size, overlap)
+        n = index_document(doc, store, embedder, chunk_size, overlap, title_prefix)
         stats.indexed += 1
         stats.chunks += n
         logger.info("documento indexado", extra={"source": doc.source, "chunks": n})

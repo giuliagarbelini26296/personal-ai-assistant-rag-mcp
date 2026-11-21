@@ -41,7 +41,14 @@ class AssistantService:
 
     def ingest(self, path: str | Path) -> IngestStats:
         s = self.settings
-        return ingest_path(Path(path), self.store, self.embedder, s.chunk_size, s.chunk_overlap)
+        return ingest_path(
+            Path(path),
+            self.store,
+            self.embedder,
+            s.chunk_size,
+            s.chunk_overlap,
+            s.chunk_title_prefix,
+        )
 
     def search(self, query: str, k: int = 4) -> list[SearchResult]:
         return self.retriever.search(query, k)
@@ -49,8 +56,9 @@ class AssistantService:
     def add_note(self, title: str, content: str) -> dict:
         source = f"notas/{slugify(title)}.md"
         doc = Document(source=source, text=f"# {title}\n\n{content}")
+        s = self.settings
         n = index_document(
-            doc, self.store, self.embedder, self.settings.chunk_size, self.settings.chunk_overlap
+            doc, self.store, self.embedder, s.chunk_size, s.chunk_overlap, s.chunk_title_prefix
         )
         return {"saved": source, "chunks": n}
 

@@ -39,6 +39,13 @@ class Settings:
     )
     chunk_size: int = field(default_factory=lambda: _env_int("CHUNK_SIZE", 120))
     chunk_overlap: int = field(default_factory=lambda: _env_int("CHUNK_OVERLAP", 30))
+    # Repete o título do documento (1ª linha "# ...") no início de cada chunk. Ajuda quando os
+    # documentos se parecem muito e o que os diferencia (data, nome) só aparece no título.
+    chunk_title_prefix: bool = field(
+        default_factory=lambda: (
+            _env_str("CHUNK_TITLE_PREFIX", "false").lower() in {"1", "true", "sim"}
+        )
+    )
     context_token_budget: int = field(
         default_factory=lambda: _env_int("CONTEXT_TOKEN_BUDGET", 1500)
     )

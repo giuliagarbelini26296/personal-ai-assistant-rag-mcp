@@ -30,6 +30,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("kind", choices=["retrieval", "answers"])
     p.add_argument("--golden", default=str(DEFAULT_GOLDEN))
+    p.add_argument(
+        "--corpus",
+        default=str(DEFAULT_SAMPLE_DIR),
+        help="pasta indexada antes de avaliar (padrão: notas de exemplo)",
+    )
+    p.add_argument(
+        "--skip-ingest",
+        action="store_true",
+        help="avalia o índice que já existe, sem indexar nada (ex.: índice de outro pipeline)",
+    )
     p.add_argument("--out", default="eval_results")
     p.add_argument("--k", type=int, default=4)
     p.add_argument("--min-hit-rate", type=float, help="mínimo de hit@k (0 a 1)")
@@ -58,7 +68,10 @@ def main(argv: list[str] | None = None) -> int:
             settings = replace(settings, db_path=str(Path(tmp) / "eval.sqlite3"))
         svc = AssistantService(settings)
         try:
-            svc.ingest(DEFAULT_SAMPLE_DIR)
+            # Sem --skip-ingest, o corpus é indexado antes. Cuidado com pgvector: o índice é
+            # persistente, e indexar as notas de exemplo num banco de outro projeto mistura os dois.
+            if not args.skip_ingest:
+                svc.ingest(args.corpus)
             if args.kind == "retrieval":
                 report = evaluate_retrieval(svc, items, k=args.k)
             else:
