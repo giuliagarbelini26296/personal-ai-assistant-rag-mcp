@@ -62,6 +62,13 @@ e um `FakeLLM` determinístico. OpenAI e Ollama são opcionais via variáveis de
 - **Números reais** (8 perguntas, Gemini + pgvector): latência p50 **1,96 s** e p95 **2,21 s**; custo estimado **US$ 0,00078 por pergunta** (cerca de US$ 0,78 por mil); o LLM é **84%** do tempo e a busca no pgvector, 4 ms.
 - Guia de estudo: [docs/estudo/03-observabilidade.md](docs/estudo/03-observabilidade.md).
 
+### Evolução 4 — base de conhecimento vinda de um pipeline de dados (21/11/2026)
+
+O projeto [bcb-data-pipeline](https://github.com/giuliagarbelini26296/bcb-data-pipeline) (Dagster + dbt) gera 264 documentos sobre juros e inflação a partir das APIs do Banco Central e usa este assistente para indexá-los no pgvector. O assistente passou a responder com fonte perguntas como "o que o Copom decidiu em novembro de 2026?".
+
+- **Cabeçalho contextual nos chunks** (`CHUNK_TITLE_PREFIX=true`): o título do documento é repetido em cada pedaço. Em documentos muito parecidos entre si (237 comunicados do Copom), o hit@1 da busca subiu de **0,50 para 0,80**. Fica desligado por padrão, para não mudar os resultados acima.
+- **Avaliação de um índice existente:** `python -m assistant.evals retrieval --skip-ingest --golden <arquivo>`. Antes, a avaliação sempre indexava as notas de exemplo, o que misturaria as notas no índice de outro projeto.
+
 ## Arquitetura
 
 ```mermaid
