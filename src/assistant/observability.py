@@ -5,8 +5,9 @@ Conceitos (detalhes em docs/estudo/03-observabilidade.md):
 - **Trace**: a história completa de uma pergunta. É formado por **spans**.
 - **Span**: uma etapa com início, fim e atributos (ex.: "llm.chat", 820 ms, 1.200 tokens).
   Spans ficam aninhados: `agent.run` > `llm.chat` / `tool.search_notes` > `retrieval.search`.
-- **Exporter**: para onde os spans vão. Aqui: nenhum (padrão), console, arquivo JSONL ou OTLP
-  (protocolo padrão, aceito por Phoenix, Langfuse, Jaeger, Grafana Tempo, Datadog...).
+- **Exporter**: para onde os spans vão. Aqui: nenhum (padrão), console, arquivo JSONL, OTLP
+  (protocolo padrão, aceito por Phoenix, Langfuse, Jaeger, Grafana Tempo, Datadog...) ou
+  Azure Monitor (Application Insights).
 
 Usar OpenTelemetry, e não o SDK de um fornecedor, permite trocar a ferramenta de visualização
 sem mexer no código. Os nomes de atributos seguem as convenções `gen_ai.*` do OpenTelemetry
@@ -125,7 +126,7 @@ def setup_tracing(
     kinds = [k.strip().lower() for k in exporter.split(",") if k.strip()]
     if not kinds or kinds == ["none"]:
         return False
-    unknown = set(kinds) - {"console", "jsonl", "otlp"}
+    unknown = set(kinds) - {"console", "jsonl", "otlp", "azure"}
     if unknown:
         raise ValueError(f"OTEL_EXPORTER desconhecido: {sorted(unknown)}")
     with _lock:
@@ -163,6 +164,12 @@ def setup_tracing(
             provider.add_span_processor(
                 BatchSpanProcessor(OTLPSpanExporter(endpoint=otlp_endpoint))
             )
+        if "azure" in kinds:
+            # Application Insights (Azure Monitor). A connection string vem da variável
+            # APPLICATIONINSIGHTS_CONNECTION_STRING, definida pela infraestrutura (Bicep).
+            from azure.monitor.opentelemetry.exporter import AzureMonitorTraceExporter
+
+            provider.add_span_processor(BatchSpanProcessor(AzureMonitorTraceExporter()))
         trace.set_tracer_provider(provider)
         _configured = True
         logger.info("tracing ativo", extra={"exporter": ",".join(kinds)})

@@ -51,7 +51,14 @@ class Settings:
     )
     max_agent_steps: int = field(default_factory=lambda: _env_int("MAX_AGENT_STEPS", 4))
     log_level: str = field(default_factory=lambda: _env_str("LOG_LEVEL", "INFO"))
-    # Observabilidade: none (padrão) | console | jsonl | otlp
+    # Segurança da API: com API_KEY definida, /ingest, /search e /chat exigem o cabeçalho
+    # X-API-Key. Vazia = sem autenticação (uso local). Em nuvem, vem do Key Vault.
+    api_key: str = field(default_factory=lambda: _env_str("API_KEY"))
+    # /ingest só aceita caminhos dentro desta pasta (sem ela, a API leria qualquer arquivo).
+    ingest_root: str = field(
+        default_factory=lambda: _env_str("INGEST_ROOT", str(DEFAULT_SAMPLE_DIR.parent))
+    )
+    # Observabilidade: none (padrão) | console | jsonl | otlp | azure
     otel_exporter: str = field(default_factory=lambda: _env_str("OTEL_EXPORTER", "none"))
     otel_endpoint: str = field(
         default_factory=lambda: _env_str(

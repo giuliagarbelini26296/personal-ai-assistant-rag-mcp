@@ -18,6 +18,8 @@ def settings(tmp_path) -> Settings:
         embedding_provider="hash",
         llm_provider="fake",
         log_level="WARNING",
+        ingest_root=str(tmp_path),
+        api_key="",  # sem autenticação nos testes gerais; ver test_api_security.py
     )
 
 

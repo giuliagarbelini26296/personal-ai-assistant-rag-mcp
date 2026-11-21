@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import logging
+import secrets
 import time
 import uuid
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -96,6 +97,18 @@ def create_app(service: AssistantService | None = None) -> FastAPI:
         logger.exception("erro não tratado", extra={"path": request.url.path})
         return JSONResponse(status_code=500, content={"detail": "Erro interno no servidor."})
 
+    def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
+        """Exige o cabeçalho X-API-Key quando API_KEY está configurada.
+
+        `secrets.compare_digest` compara em tempo constante: o tempo de resposta não revela
+        quantos caracteres da chave estavam certos.
+        """
+        expected = app.state.service.settings.api_key
+        if expected and not (x_api_key and secrets.compare_digest(x_api_key, expected)):
+            raise HTTPException(status_code=401, detail="API key ausente ou inválida.")
+
+    protected = [Depends(require_api_key)]
+
     @app.get("/health")
     def health() -> dict:
         svc: AssistantService = app.state.service
@@ -107,20 +120,24 @@ def create_app(service: AssistantService | None = None) -> FastAPI:
             "llm_provider": svc.settings.llm_provider,
         }
 
-    @app.post("/ingest", response_model=IngestResponse)
+    @app.post("/ingest", response_model=IngestResponse, dependencies=protected)
     def ingest(body: IngestRequest) -> IngestResponse:
-        path = Path(body.path)
+        root = Path(app.state.service.settings.ingest_root).resolve()
+        path = Path(body.path).resolve()
+        # resolve() desfaz "..", e is_relative_to barra caminhos fora da pasta permitida
+        if not path.is_relative_to(root):
+            raise HTTPException(status_code=403, detail="Caminho fora da pasta permitida.")
         if not path.exists():
             raise HTTPException(status_code=404, detail=f"Caminho não encontrado: {body.path}")
         stats = app.state.service.ingest(path)
         return IngestResponse(**vars(stats))
 
-    @app.post("/search", response_model=SearchResponse)
+    @app.post("/search", response_model=SearchResponse, dependencies=protected)
     def search(body: SearchRequest) -> SearchResponse:
         results = app.state.service.search(body.query, body.k)
         return SearchResponse(results=[SearchHit(**r.to_dict()) for r in results])
 
-    @app.post("/chat", response_model=ChatResponse)
+    @app.post("/chat", response_model=ChatResponse, dependencies=protected)
     def chat(body: ChatRequest) -> ChatResponse:
         sessions: dict[str, ConversationMemory] = app.state.sessions
         session_id = body.session_id or uuid.uuid4().hex[:12]

@@ -30,7 +30,8 @@ def test_ingest_endpoint(client, tmp_path):
     (tmp_path / "nova.md").write_text("# Nova nota\nEstudar MCP na sexta.", encoding="utf-8")
     body = client.post("/ingest", json={"path": str(tmp_path)}).json()
     assert body["indexed"] == 1
-    assert client.post("/ingest", json={"path": "/caminho/que/nao/existe"}).status_code == 404
+    missing = str(tmp_path / "nao-existe")  # dentro da pasta permitida, mas não existe
+    assert client.post("/ingest", json={"path": missing}).status_code == 404
 
 
 def test_chat_keeps_session(client):
