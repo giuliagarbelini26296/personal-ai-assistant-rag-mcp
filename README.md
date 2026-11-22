@@ -69,6 +69,14 @@ O projeto [bcb-data-pipeline](https://github.com/giuliagarbelini26296/bcb-data-p
 - **Cabeçalho contextual nos chunks** (`CHUNK_TITLE_PREFIX=true`): o título do documento é repetido em cada pedaço. Em documentos muito parecidos entre si (237 comunicados do Copom), o hit@1 da busca subiu de **0,50 para 0,80**. Fica desligado por padrão, para não mudar os resultados acima.
 - **Avaliação de um índice existente:** `python -m assistant.evals retrieval --skip-ingest --golden <arquivo>`. Antes, a avaliação sempre indexava as notas de exemplo, o que misturaria as notas no índice de outro projeto.
 
+### Evolução 5 — em produção no Azure (21/11/2026)
+
+- **Azure Container Apps** (escala a zero, só HTTPS), **PostgreSQL Flexible + pgvector**, **Key Vault** lido por identidade gerenciada e **Application Insights** recebendo os spans OpenTelemetry.
+- **Infraestrutura como código** em [`infra/main.bicep`](infra/main.bicep) e **deploy automático** a cada push na main, com **OIDC** (nenhuma senha do Azure no GitHub) e teste de fumaça.
+- **Pronto para internet:** API key obrigatória (`X-API-Key`), `/ingest` restrito a uma pasta, container sem root e limite do provedor de IA respondido como 503 com `Retry-After`.
+- **Em produção:** respostas com fonte em 1,0 a 1,5 s, cerca de US$ 0,0005 por pergunta, dentro do plano Azure for Students.
+- Sete problemas reais de produção, de um modo novo do Azure que não aceita Key Vault à cota diária do Gemini, estão no guia: [docs/estudo/04-nuvem-azure.md](docs/estudo/04-nuvem-azure.md).
+
 ## Arquitetura
 
 ```mermaid

@@ -37,6 +37,10 @@ param adminPrincipalId string = ''
 @description('Subject do token OIDC do GitHub autorizado a fazer deploy (só a main deste repositório).')
 param githubOidcSubject string = 'repo:giuliagarbelini26296@218857421/personal-ai-assistant-rag-mcp@1464762314:ref:refs/heads/main'
 
+@description('Embedder: hash (local, sem cota) ou gemini (melhor busca, cota grátis de 1.000/dia). Trocar exige reindexar: o banco não mistura embedders.')
+@allowed([ 'hash', 'gemini' ])
+param embeddingProvider string = 'hash'
+
 var suffix = uniqueString(resourceGroup().id)
 var dbAdmin = 'assistant'
 var dbName = 'assistant'
@@ -242,7 +246,7 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
           env: [
             { name: 'VECTOR_STORE', value: 'pgvector' }
             { name: 'DATABASE_URL', secretRef: 'database-url' }
-            { name: 'EMBEDDING_PROVIDER', value: 'gemini' }
+            { name: 'EMBEDDING_PROVIDER', value: embeddingProvider }
             { name: 'LLM_PROVIDER', value: 'gemini' }
             { name: 'GEMINI_API_KEY', secretRef: 'gemini-api-key' }
             { name: 'API_KEY', secretRef: 'api-key' }
