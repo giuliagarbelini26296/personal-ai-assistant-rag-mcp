@@ -31,8 +31,11 @@ param dbAdminPassword string
 @description('Object ID de quem administra (pode ler e gravar segredos no Key Vault). Vazio = ninguém além da app.')
 param adminPrincipalId string = ''
 
-@description('Repositório do GitHub autorizado a fazer deploy (OIDC), no formato dono/nome.')
-param githubRepo string = 'giuliagarbelini26296/personal-ai-assistant-rag-mcp'
+// O GitHub manda o "subject" do token OIDC com IDs imutáveis: repo:dono@ID/nome@ID:ref:...
+// Achado no 1º deploy (AADSTS700213). Com os IDs, um repositório recriado com o mesmo nome
+// não herda a confiança. IDs: gh api users/<dono> --jq .id e gh api repos/<dono>/<nome> --jq .id
+@description('Subject do token OIDC do GitHub autorizado a fazer deploy (só a main deste repositório).')
+param githubOidcSubject string = 'repo:giuliagarbelini26296@218857421/personal-ai-assistant-rag-mcp@1464762314:ref:refs/heads/main'
 
 var suffix = uniqueString(resourceGroup().id)
 var dbAdmin = 'assistant'
@@ -134,7 +137,7 @@ resource deployFederation 'Microsoft.ManagedIdentity/userAssignedIdentities/fede
   name: 'github-main'
   properties: {
     issuer: 'https://token.actions.githubusercontent.com'
-    subject: 'repo:${githubRepo}:ref:refs/heads/main'
+    subject: githubOidcSubject
     audiences: [ 'api://AzureADTokenExchange' ]
   }
 }

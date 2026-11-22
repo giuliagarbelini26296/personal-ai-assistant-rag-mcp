@@ -44,3 +44,6 @@ def setup_logging(level: str = "INFO") -> None:
     root.setLevel(level.upper())
     # Bibliotecas muito verbosas
     logging.getLogger("httpx").setLevel(logging.WARNING)
+    # O SDK do Azure Monitor registra cada envio de telemetria em INFO. Em produção isso
+    # virava várias linhas por requisição, e cada linha conta na cota do Log Analytics.
+    logging.getLogger("azure").setLevel(logging.WARNING)
