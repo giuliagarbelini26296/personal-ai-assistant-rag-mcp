@@ -76,6 +76,7 @@ Quase nada funcionou de primeira. Todos estes problemas são de produção, e ne
    - a versão antiga continuava no ar e regravava "gemini" a cada reinício.
 
    A saída foi, nesta ordem: desativar a versão antiga; limpar as tabelas vazias, abrindo o banco **só para o meu IP** e fechando logo depois (com `trap`); e criar uma versão nova. Uma versão em `ActivationFailed` não volta com restart.
+   **Na volta para o Gemini (23/11), a mesma receita falhou.** Ao criar a versão nova, o Azure **reativou sozinho a versão antiga** para não deixar a app fora do ar; ela subiu primeiro e gravou "hash" no banco recém-limpo. Desativar e limpar à mão depende de quem chega primeiro: é uma condição de corrida. A solução definitiva foi **um banco por embedder** (`assistant` para hash, `assistant_gemini` para Gemini, cada um com seu segredo no Key Vault). As duas versões nunca disputam o mesmo índice, a troca não tem janela de risco, e voltar atrás é só apontar de novo. O Bicep já cria assim.
 6. **Logs pagos à toa.** O SDK do Azure Monitor registrava cada envio de telemetria em INFO, várias linhas por requisição, e cada linha conta na cota do Log Analytics. O logger `azure` passou para WARNING.
 7. **Falso positivo do gitleaks.** Ele acusou o ID público de um papel do Azure (`4633458b-...`, igual em todos os tenants). O caso foi registrado em `.gitleaksignore`. Antes disso, um push passou com o aviso, porque o `| tail` engoliu o código de saída. O comando foi corrigido para parar se houver achado.
 
@@ -95,7 +96,7 @@ curl -X POST https://<app>/chat   -H "X-API-Key: $K" -H 'Content-Type: applicati
 ```
 
 ## Exercícios
-1. Troque o embedder de volta para `gemini` quando a cota voltar. Quais passos do item 5 você precisa repetir? Como automatizar isso?
+1. Com um banco por embedder, a troca virou um parâmetro (`embeddingProvider`). Rode o Bicep com `hash` e depois com `gemini` e confira que cada versão usa só o próprio banco. O que acontece com os dados do banco que deixou de ser usado?
 2. Escreva uma consulta KQL no Log Analytics que mostre o p95 de `llm.chat` por hora.
 3. Investigue os ~730 ms do `/chat` que ficam fora do `agent.run`. Crie spans para a memória de sessão e para a montagem da resposta e descubra onde está o tempo.
 4. Desafio: troque a regra "serviços do Azure" do banco por uma rede virtual com endpoint privado. Quanto passaria a custar?

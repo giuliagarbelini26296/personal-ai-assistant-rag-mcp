@@ -39,11 +39,15 @@ param githubOidcSubject string = 'repo:giuliagarbelini26296@218857421/personal-a
 
 @description('Embedder: hash (local, sem cota) ou gemini (melhor busca, cota grátis de 1.000/dia). Trocar exige reindexar: o banco não mistura embedders.')
 @allowed([ 'hash', 'gemini' ])
-param embeddingProvider string = 'hash'
+param embeddingProvider string = 'gemini'
 
 var suffix = uniqueString(resourceGroup().id)
 var dbAdmin = 'assistant'
-var dbName = 'assistant'
+// Um banco por embedder: vetores de embedders diferentes não se misturam (o assistente recusa
+// abrir um índice criado com outro). Com bancos separados, a troca não tem disputa entre a
+// versão antiga e a nova da app. Achado ao trocar hash -> gemini em produção (23/11/2026).
+var dbName = embeddingProvider == 'hash' ? 'assistant' : 'assistant_${embeddingProvider}'
+var dbUrlSecretName = embeddingProvider == 'hash' ? 'database-url' : 'database-url-${embeddingProvider}'
 
 // ------------------------------------------------------------------ observabilidade
 resource logs 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
@@ -98,7 +102,7 @@ resource secretApiKey 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
 
 resource secretDbUrl 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
   parent: vault
-  name: 'database-url'
+  name: dbUrlSecretName
   properties: {
     value: 'postgresql://${dbAdmin}:${dbAdminPassword}@${postgres.properties.fullyQualifiedDomainName}:5432/${dbName}?sslmode=require'
   }
@@ -234,7 +238,7 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
       secrets: [
         { name: 'gemini-api-key', keyVaultUrl: secretGemini.properties.secretUri, identity: identity.id }
         { name: 'api-key', keyVaultUrl: secretApiKey.properties.secretUri, identity: identity.id }
-        { name: 'database-url', keyVaultUrl: secretDbUrl.properties.secretUri, identity: identity.id }
+        { name: dbUrlSecretName, keyVaultUrl: secretDbUrl.properties.secretUri, identity: identity.id }
       ]
     }
     template: {
@@ -245,7 +249,7 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
           resources: { cpu: json('0.5'), memory: '1Gi' }
           env: [
             { name: 'VECTOR_STORE', value: 'pgvector' }
-            { name: 'DATABASE_URL', secretRef: 'database-url' }
+            { name: 'DATABASE_URL', secretRef: dbUrlSecretName }
             { name: 'EMBEDDING_PROVIDER', value: embeddingProvider }
             { name: 'LLM_PROVIDER', value: 'gemini' }
             { name: 'GEMINI_API_KEY', secretRef: 'gemini-api-key' }
